@@ -1,11 +1,12 @@
 using Amazon;
 using Amazon.Lambda.Core;
 using Amazon.S3;
+using Amazon.S3.Model;
 using Amazon.S3.Transfer;
 using Newtonsoft.Json;
 using Npgsql;
+using NpgsqlTypes;
 using NPOI.HSSF.UserModel;
-using NPOI.POIFS.Crypt;
 using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using RestSharp;
@@ -20,6 +21,12 @@ namespace DownloadInventoryFunc;
 
 public class Function
 {
+
+    // Define the S3 bucket and key where you want to upload the file
+    const string bucketName = "flipkartinventory";
+    string keyName = string.Empty;
+
+    //Connection string
     const string connectionString = "Server=postgresql-113549-0.cloudclusters.net;Port=19060;Database=flipkartpay;User Id=flipkartpay;Password=Mayur@8692;";
     /// <summary>
     /// A simple function that takes a string and does a ToUpper
@@ -34,6 +41,8 @@ public class Function
         {
             try
             {
+                keyName = $"stockfiles/";
+
                 var response = GetCSRFToken(cookiemst, null);
                 //if cookie is expired
                 if (response == null)
@@ -68,30 +77,30 @@ public class Function
                     var responselist = stockFileResponseList.stock_file_response_list.OrderByDescending(x => x.uploaded_on).FirstOrDefault();
                     if (responselist != null)
                     {
-                        string filePath = DownloadStockFile(cookiemst, responselist);
+                        DownloadStockFile(cookiemst, responselist);
 
-                        UploadFileOnAWSS3(filePath);
-
-                        DataTable dt = ExcelToDataTable(filePath, cookiemst.licensekey);
+                        DataTable dt = ExcelToDataTable(cookiemst.licensekey);
 
                         InsertSKULicenseMaster(dt, "SKUListingMaster");
                     }
                 }
             }
-            catch
-            { }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
             finally
             {
                 // Define the values for the new entry
                 DateTime syncdate = DateTime.Now;
                 string sellerid = cookiemst.sellerid;
                 string licenseid = cookiemst.licensekey;
-                string description = "my description";
+                string description = "StockFile Downloaded and insert data in SKUListingMaster";
                 bool isexecutedfunc1 = true;
                 ExecutionStatus func1status = ExecutionStatus.Execute;
                 string func1error = string.Empty;
                 FunctionName function = FunctionName.Function1;
-                string filepath = @"D:\123.xls";
+                string filepath = $"{bucketName}\\{keyName}";
 
                 // Call the function to insert the new entry into the database
                 InsertAutoSyncHistoryEntry(syncdate, sellerid, licenseid, description, isexecutedfunc1, func1status, func1error, FunctionName.Function2, filepath);
@@ -212,10 +221,10 @@ public class Function
                 cmd.Parameters.AddWithValue("sellerid", sellerid);
                 cmd.Parameters.AddWithValue("licenseid", licenseid);
                 cmd.Parameters.AddWithValue("description", description);
-                cmd.Parameters.AddWithValue("isexecutedfuncsync", isexecutedfuncsync);
-                cmd.Parameters.AddWithValue("funcsyncstatus", funcsyncstatus);
+                cmd.Parameters.AddWithValue("isexecutedfuncsync", NpgsqlDbType.Bit, isexecutedfuncsync);
+                cmd.Parameters.AddWithValue("funcsyncstatus", Convert.ToInt16(funcsyncstatus));
                 cmd.Parameters.AddWithValue("funcsyncerror", funcsyncerror);
-                cmd.Parameters.AddWithValue("funcname", funcName);
+                cmd.Parameters.AddWithValue("funcname", Convert.ToInt16(funcName));
                 cmd.Parameters.AddWithValue("filepath", filepath);
                 cmd.Parameters.AddWithValue("funcsyncexecutiondate", DateTime.Now);
 
@@ -257,7 +266,7 @@ public class Function
 
     }
 
-    private string DownloadStockFile(CookieMaster cookiemst, StockFileResponse? responselist)
+    private void DownloadStockFile(CookieMaster cookiemst, StockFileResponse? responselist)
     {
         string BaseURL = "https://seller.flipkart.com/napi/listing/stockFileDownload?sellerId=" + cookiemst.sellerid + "&fileId=";
         string GetFromHistory = responselist.file_link;
@@ -271,9 +280,7 @@ public class Function
         IRestResponse Test = DownloadStockFile(cookiemst, strUrl);
         byte[] x = Test.RawBytes;
 
-        string filePath = @"D:\123.xls";
-        System.IO.File.WriteAllBytes(filePath, x);
-        return filePath;
+        UploadFileOnAWSS3(x, cookiemst.sellerid);
     }
 
     public IRestResponse DownloadStockFile(CookieMaster cookiesMst, string URL)
@@ -408,26 +415,126 @@ public class Function
     }
     #endregion
 
-    private void UploadFileOnAWSS3(string filePath)
+    #region AWS 
+    private bool DoesBucketExist(AmazonS3Client s3Client, string bucketName)
     {
-        var s3Client = new AmazonS3Client(accessKey, secretKey, RegionEndpoint.USWest2);
+        try
+        {
+            ListBucketsResponse response = s3Client.ListBucketsAsync().Result;
+            if (response.Buckets.Any(b => b.BucketName == bucketName))
+            {
 
-        // Set the bucket name and key for the new file
-        string bucketName = "my-bucket";
-        string keyName = "my-folder/my-file.xls";
-
-        // Create a TransferUtility instance to upload the file to S3
-        var transferUtility = new TransferUtility(s3Client);
-
-        // Upload the XLS file to S3
-        transferUtility.Upload(filePath, bucketName, keyName);
+                return true;
+            }
+            else
+                return false;
+        }
+        catch (AmazonS3Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+            if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+        }
+        return false;
     }
 
-    #region Common Method
-    public DataTable ExcelToDataTable(string filePath, string licenseKey)
+    public void CreateBucketIfNotExists(AmazonS3Client s3Client, string bucketName, RegionEndpoint region)
     {
-        // Load the Excel file into a DataTable
+
+        if (DoesBucketExist(s3Client, bucketName))
+        {
+            Console.WriteLine($"Bucket {bucketName} already exists.");
+            return;
+        }
+        else
+        {
+            // Bucket does not exist, create it
+            var putBucketRequest = new PutBucketRequest
+            {
+                BucketName = bucketName,
+                UseClientRegion = true,
+                BucketRegion = S3Region.USEast2
+
+            };
+            s3Client.PutBucketAsync(putBucketRequest).Wait();
+            Console.WriteLine($"Created bucket {bucketName} in {region.DisplayName}.");
+        }
+    }
+
+    private void UploadFileOnAWSS3(byte[] byteArray, string sellerid)
+    {
+        try
+        {
+            var s3Config = new AmazonS3Config
+            {
+                RegionEndpoint = RegionEndpoint.USEast2
+            };
+
+            var s3Client = new AmazonS3Client("AKIARAOYPYGGOZQ7DNNA", "xwJ5b6jpqOxpcs+RC8PSBAN0JHdrZW8MZmNcp8xP", s3Config);
+
+            // Use the S3 client to interact with the service
+            CreateBucketIfNotExists(s3Client, bucketName, s3Config.RegionEndpoint);
+            ListBucketsResponse response = s3Client.ListBucketsAsync().Result;
+            if (response.Buckets.Any(b => b.BucketName == bucketName))
+            {
+                // Bucket exists
+                keyName = $"{keyName}{sellerid}_{DateTime.Now.ToString("yyyyMMdd")}.xls";
+
+                using (var stream = new MemoryStream(byteArray))
+                {
+                    // Create a new TransferUtility instance
+                    var transferUtility = new TransferUtility(s3Client);
+
+                    // Upload the file to S3
+                    transferUtility.Upload(stream, bucketName, keyName);
+                }
+            }
+        }
+        catch (AmazonS3Exception e)
+        {
+            Console.WriteLine("Error encountered ***. Message:'{0}' when writing an object", e.Message);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+    }
+
+    #endregion
+
+    #region Common Method
+    public DataTable ExcelToDataTable(string licenseKey)
+    {
         DataTable dataTable = new DataTable();
+        // Create a new S3 client
+        var s3Config = new AmazonS3Config
+        {
+            RegionEndpoint = RegionEndpoint.USEast2
+        };
+
+        var s3Client = new AmazonS3Client("AKIARAOYPYGGOZQ7DNNA", "xwJ5b6jpqOxpcs+RC8PSBAN0JHdrZW8MZmNcp8xP", s3Config);
+
+        // specify the local download folder
+        var downloadFolder = @"C:\Downloads\";
+        if (!Directory.Exists(downloadFolder))
+        {
+            Directory.CreateDirectory(downloadFolder);
+        }
+
+        // create a GetObjectRequest to download the file from S3
+        var request = new GetObjectRequest
+        {
+            BucketName = bucketName,
+            Key = keyName
+        };
+
+        // download the file from S3 and save it to the local download folder
+        var response = s3Client.GetObjectAsync(request).Result;
+        var filePath = Path.Combine(downloadFolder, Path.GetFileName(keyName));
+
+        // Load the Excel file into a DataTable
         using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
         {
             IWorkbook workbook;
@@ -460,6 +567,7 @@ public class Function
 
             }
         }
+
         return dataTable;
     }
 
