@@ -1,5 +1,7 @@
 using Amazon;
 using Amazon.Lambda.Core;
+using Amazon.Runtime.CredentialManagement;
+using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.S3.Transfer;
@@ -455,7 +457,7 @@ public class Function
             {
                 BucketName = bucketName,
                 UseClientRegion = true,
-                BucketRegion = S3Region.USEast2
+                BucketRegion = S3Region.APSouth1
 
             };
             s3Client.PutBucketAsync(putBucketRequest).Wait();
@@ -469,10 +471,21 @@ public class Function
         {
             var s3Config = new AmazonS3Config
             {
-                RegionEndpoint = RegionEndpoint.USEast2
+                RegionEndpoint = RegionEndpoint.APSouth1
             };
 
-            var s3Client = new AmazonS3Client("AKIARAOYPYGGOZQ7DNNA", "xwJ5b6jpqOxpcs+RC8PSBAN0JHdrZW8MZmNcp8xP", s3Config);
+            string accessKey = string.Empty;
+            string secretKey = string.Empty;
+            var chain = new CredentialProfileStoreChain();
+            AWSCredentials credentials;
+            if (chain.TryGetAWSCredentials("Admin", out credentials))
+            {
+                 accessKey = credentials.GetCredentials().AccessKey;
+                 secretKey = credentials.GetCredentials().SecretKey;
+                // Use the accessKey and secretKey here
+            }
+
+            var s3Client = new AmazonS3Client(accessKey, secretKey, s3Config);
 
             // Use the S3 client to interact with the service
             CreateBucketIfNotExists(s3Client, bucketName, s3Config.RegionEndpoint);
