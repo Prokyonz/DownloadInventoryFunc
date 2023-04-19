@@ -27,6 +27,8 @@ public class Function
     // Define the S3 bucket and key where you want to upload the file
     const string bucketName = "flipkartinventory";
     string keyName = string.Empty;
+    string accessKey = string.Empty;
+    string secretKey = string.Empty;
 
     //Connection string
     const string connectionString = "Server=postgresql-113549-0.cloudclusters.net;Port=19060;Database=flipkartpay;User Id=flipkartpay;Password=Mayur@8692;";
@@ -89,7 +91,10 @@ public class Function
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                if (ex.InnerException != null)
+                    Console.WriteLine(ex.InnerException.Message);
+                else
+                    Console.WriteLine(ex.Message);
             }
             finally
             {
@@ -474,14 +479,13 @@ public class Function
                 RegionEndpoint = RegionEndpoint.APSouth1
             };
 
-            string accessKey = string.Empty;
-            string secretKey = string.Empty;
+
             var chain = new CredentialProfileStoreChain();
             AWSCredentials credentials;
             if (chain.TryGetAWSCredentials("Admin", out credentials))
             {
-                 accessKey = credentials.GetCredentials().AccessKey;
-                 secretKey = credentials.GetCredentials().SecretKey;
+                accessKey = credentials.GetCredentials().AccessKey;
+                secretKey = credentials.GetCredentials().SecretKey;
                 // Use the accessKey and secretKey here
             }
 
@@ -527,7 +531,7 @@ public class Function
             RegionEndpoint = RegionEndpoint.USEast2
         };
 
-        var s3Client = new AmazonS3Client("AKIARAOYPYGGOZQ7DNNA", "xwJ5b6jpqOxpcs+RC8PSBAN0JHdrZW8MZmNcp8xP", s3Config);
+        var s3Client = new AmazonS3Client(accessKey, secretKey, s3Config);
 
         // specify the local download folder
         var downloadFolder = @"C:\Downloads\";
