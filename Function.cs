@@ -192,6 +192,21 @@ public class Function
             var columnsList = string.Join(",", dataTable.Columns.Cast<DataColumn>().Select(c => $"{Regex.Replace(c.ColumnName, pattern, replacement)}"));
             foreach (DataRow row in dataTable.Rows)
             {
+                // Check if the listing ID is already present in the table
+                string listingId = row["listingid"].ToString();
+                string checkListingSql = $"SELECT COUNT(*) FROM {tableName} WHERE listingid = '{listingId}'";
+
+                using (NpgsqlCommand cmd = new NpgsqlCommand(checkListingSql, conn))
+                {
+                    int count = (int)cmd.ExecuteScalar();
+                    if (count > 0)
+                    {
+                        // Listing ID already present, skip inserting the row
+                        continue;
+                    }
+                }
+
+                // Insert the row
                 string Sql = $"INSERT INTO {tableName} ({columnsList})";
                 Sql += "VALUES(";
                 for (int i = 0; i < dataTable.Columns.Count; i++)
