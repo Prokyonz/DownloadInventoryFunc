@@ -46,7 +46,7 @@ public class Function
             try
             {
                 keyName = $"stockfiles/";
-
+            start:
                 var response = GetCSRFToken(cookiemst, null);
                 //if cookie is expired
                 if (response == null)
@@ -69,6 +69,7 @@ public class Function
                                 }
                             }
                             UpdateCookieString(strCookiesData, cookiemst.cookiesmasterid);
+                            goto start;
                         }
                     }
 
@@ -140,7 +141,9 @@ public class Function
                 cookiesmasterid = Convert.ToInt32(dr[0]),
                 licensekey = dr[1].ToString(),
                 sellerid = dr[2].ToString(),
-                cookiestring = dr[3].ToString()
+                cookiestring = dr[3].ToString(),
+                username = dr[5].ToString(),
+                password_encrypt = dr[6].ToString()
             });
             dr.NextResult();
         }
