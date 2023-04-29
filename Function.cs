@@ -40,6 +40,11 @@ public class Function
     /// <returns></returns>
     public string FunctionHandler(string input, ILambdaContext context)
     {
+        bool isError = false;
+        string errorMessage = string.Empty;
+        int attempt = 0;
+        Root? csrfTokenRoot = null;
+
         var cookiesList = GetCookieMaster();
         cookiesList.ForEach(cookiemst =>
         {
@@ -52,28 +57,26 @@ public class Function
                 if (response == null)
                 {
                     //login to flipkart
-                    var loginResponse = Login(cookiemst.username, cookiemst.password_encrypt);
-                    if (loginResponse.ResponseStatus == ResponseStatus.Completed)
-                    {
-                        SellerResponse responseSeller = JsonConvert.DeserializeObject<SellerResponse>(loginResponse.Content.ToString());
-
-                        if (responseSeller.code == 1000)
-                        {
-                            string strCookiesData = string.Empty;
-                            foreach (string eCookie in cookiemst.cookiestring.Split(';'))
-                            {
-                                if (eCookie.Contains("="))
-                                {
-                                    string[] split = eCookie.Split('=');
-                                    strCookiesData = strCookiesData + split[0].ToString().Trim() + "=" + split[1].ToString().Trim() + "; ";
-                                }
-                            }
-                            UpdateCookieString(strCookiesData, cookiemst.cookiesmasterid);
-                            goto start;
-                        }
-                    }
+                    Login(cookiemst);
+                    goto start;
 
                 }
+                try
+                {
+                    csrfTokenRoot = JsonConvert.DeserializeObject<Root>(response?.Content.ToString());
+                }
+                catch
+                {
+                    if (attempt < 3)
+                    {
+                        attempt++;
+                        Login(cookiemst);
+                        goto start;
+                    }
+                    else
+                        throw;
+                }
+
                 var inventoryResponse = DownloadInventory(cookiemst);
                 string json = inventoryResponse.Content.ToString();
                 StockFileResponseList stockFileResponseList = JsonConvert.DeserializeObject<StockFileResponseList>(json);
@@ -259,6 +262,28 @@ public class Function
         }
     }
 
+    private void Login(CookieMaster cookiemst)
+    {
+        var loginResponse = Login(cookiemst.username, cookiemst.password_encrypt);
+        if (loginResponse.ResponseStatus == ResponseStatus.Completed)
+        {
+            SellerResponse responseSeller = JsonConvert.DeserializeObject<SellerResponse>(loginResponse.Content.ToString());
+
+            if (responseSeller.code == 1000)
+            {
+                string strCookiesData = string.Empty;
+                foreach (string eCookie in cookiemst.cookiestring.Split(';'))
+                {
+                    if (eCookie.Contains("="))
+                    {
+                        string[] split = eCookie.Split('=');
+                        strCookiesData = strCookiesData + split[0].ToString().Trim() + "=" + split[1].ToString().Trim() + "; ";
+                    }
+                }
+                UpdateCookieString(strCookiesData, cookiemst.cookiesmasterid);
+            }
+        }
+    }
     #endregion
 
     #region API 
