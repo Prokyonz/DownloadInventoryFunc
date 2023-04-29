@@ -89,7 +89,7 @@ public class Function
 
                         DataTable dt = ExcelToDataTable(cookiemst.licensekey);
 
-                        InsertSKULicenseMaster(dt, "SKUListingMaster");
+                        InsertSKULicenseMaster(dt, "skulistingmaster");
                     }
                 }
             }
@@ -200,7 +200,8 @@ public class Function
             {
                 // Check if the listing ID is already present in the table
                 string listingId = row["listingid"].ToString();
-                string checkListingSql = $"SELECT COUNT(*) FROM {tableName} WHERE listingid = '{listingId}'";
+                string licenseKey = row["licensekey"].ToString();
+                string checkListingSql = $"SELECT COUNT(*) FROM {tableName} WHERE listingid = '{listingId}' AND licensekey = '{licenseKey}'";
 
                 using (NpgsqlCommand cmd = new NpgsqlCommand(checkListingSql, conn))
                 {
@@ -609,8 +610,8 @@ public class Function
             {
                 dataTable.Columns.Add(cell.ToString());
             }
-            dataTable.Columns.Add("LicenseKey", typeof(string));
-            dataTable.Columns.Add("Price", typeof(string));
+            dataTable.Columns.Add("licensekey", typeof(string));
+            dataTable.Columns.Add("price", typeof(string));
 
             for (int i = (sheet.FirstRowNum + 1); i <= sheet.LastRowNum; i++)
             {
