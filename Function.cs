@@ -48,6 +48,9 @@ public class Function
         var cookiesList = GetCookieMaster();
         cookiesList.ForEach(cookiemst =>
         {
+            string errorMessage = string.Empty;
+            int attempt = 0;
+            Root? csrfTokenRoot = null;
             try
             {
                 keyName = $"stockfiles/";
@@ -76,29 +79,38 @@ public class Function
                     else
                         throw;
                 }
-
-                var inventoryResponse = DownloadInventory(cookiemst);
-                string json = inventoryResponse.Content.ToString();
-                StockFileResponseList stockFileResponseList = JsonConvert.DeserializeObject<StockFileResponseList>(json);
-                if (stockFileResponseList != null)
+                if (csrfTokenRoot != null && !string.IsNullOrEmpty(csrfTokenRoot?.csrfToken ?? string.Empty))
                 {
-                    var responselist = stockFileResponseList.stock_file_response_list.OrderByDescending(x => x.uploaded_on).FirstOrDefault();
-                    if (responselist != null)
+                    var inventoryResponse = DownloadInventory(cookiemst);
+                    string json = inventoryResponse.Content.ToString();
+                    StockFileResponseList stockFileResponseList = JsonConvert.DeserializeObject<StockFileResponseList>(json);
+                    if (stockFileResponseList != null)
                     {
-                        DownloadStockFile(cookiemst, responselist);
+                        var responselist = stockFileResponseList.stock_file_response_list.OrderByDescending(x => x.uploaded_on).FirstOrDefault();
+                        if (responselist != null)
+                        {
+                            DownloadStockFile(cookiemst, responselist);
 
-                        DataTable dt = ExcelToDataTable(cookiemst.licensekey);
+                            DataTable dt = ExcelToDataTable(cookiemst.licensekey);
 
-                        InsertSKULicenseMaster(dt, "skulistingmaster");
+                            InsertSKULicenseMaster(dt, "skulistingmaster");
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
                 if (ex.InnerException != null)
+                {
                     Console.WriteLine(ex.InnerException.Message);
+                    errorMessage = ex.InnerException.Message;
+                }
                 else
+                {
                     Console.WriteLine(ex.Message);
+                    errorMessage = ex.Message;
+                }
+
             }
             finally
             {
@@ -106,18 +118,41 @@ public class Function
                 DateTime syncdate = DateTime.Now;
                 string sellerid = cookiemst.sellerid;
                 string licenseid = cookiemst.licensekey;
-                string description = "StockFile Downloaded and insert data in SKUListingMaster";
+                string description = string.IsNullOrEmpty(errorMessage) ? "StockFile Downloaded and insert data in SKUListingMaster" : errorMessage;
                 bool isexecutedfunc1 = true;
                 ExecutionStatus func1status = ExecutionStatus.Execute;
                 string func1error = string.Empty;
-                FunctionName function = FunctionName.Function1;
+                FunctionName function = FunctionName.Function2;
                 string filepath = $"{bucketName}\\{keyName}";
 
                 // Call the function to insert the new entry into the database
-                InsertAutoSyncHistoryEntry(syncdate, sellerid, licenseid, description, isexecutedfunc1, func1status, func1error, FunctionName.Function2, filepath);
+                InsertAutoSyncHistoryEntry(syncdate, sellerid, licenseid, description, isexecutedfunc1, func1status, func1error, function, filepath);
             }
         });
         return input.ToUpper();
+    }
+
+    private void Login(CookieMaster cookiemst)
+    {
+        var loginResponse = Login(cookiemst.username, cookiemst.password_encrypt);
+        if (loginResponse.ResponseStatus == ResponseStatus.Completed)
+        {
+            SellerResponse responseSeller = JsonConvert.DeserializeObject<SellerResponse>(loginResponse.Content.ToString());
+
+            if (responseSeller.code == 1000)
+            {
+                string strCookiesData = string.Empty;
+                foreach (string eCookie in cookiemst.cookiestring.Split(';'))
+                {
+                    if (eCookie.Contains("="))
+                    {
+                        string[] split = eCookie.Split('=');
+                        strCookiesData = strCookiesData + split[0].ToString().Trim() + "=" + split[1].ToString().Trim() + "; ";
+                    }
+                }
+                UpdateCookieString(strCookiesData, cookiemst.cookiesmasterid);
+            }
+        }
     }
 
     #region Database Operations
@@ -263,28 +298,6 @@ public class Function
         }
     }
 
-    private void Login(CookieMaster cookiemst)
-    {
-        var loginResponse = Login(cookiemst.username, cookiemst.password_encrypt);
-        if (loginResponse.ResponseStatus == ResponseStatus.Completed)
-        {
-            SellerResponse responseSeller = JsonConvert.DeserializeObject<SellerResponse>(loginResponse.Content.ToString());
-
-            if (responseSeller.code == 1000)
-            {
-                string strCookiesData = string.Empty;
-                foreach (string eCookie in cookiemst.cookiestring.Split(';'))
-                {
-                    if (eCookie.Contains("="))
-                    {
-                        string[] split = eCookie.Split('=');
-                        strCookiesData = strCookiesData + split[0].ToString().Trim() + "=" + split[1].ToString().Trim() + "; ";
-                    }
-                }
-                UpdateCookieString(strCookiesData, cookiemst.cookiesmasterid);
-            }
-        }
-    }
     #endregion
 
     #region API 
